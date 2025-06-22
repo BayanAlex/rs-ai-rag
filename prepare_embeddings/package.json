@@ -1,0 +1,16 @@
+{
+  "name": "prepare",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "Oleksandr Shyhyda",
+  "type": "module",
+  "main": "index.js",
+  "dependencies": {
+    "@langchain/community": "^0.3.47",
+    "@langchain/core": "^0.3.61",
+    "@supabase/supabase-js": "^2.50.0",
+    "dotenv": "^16.5.0",
+    "openai": "^5.6.0"
+  }
+}
