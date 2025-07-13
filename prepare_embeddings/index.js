@@ -1,10 +1,9 @@
-import { createClient } from '@supabase/supabase-js';
 import 'dotenv/config';
 import fs from 'fs/promises';
-import { Document } from "@langchain/core/documents";
-import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
-import { OpenAIEmbeddings } from "@langchain/openai";
-import { SupabaseVectorStore } from "@langchain/community/vectorstores/supabase";
+import { Document } from '@langchain/core/documents';
+import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
+import { OpenAIEmbeddings } from '@langchain/openai';
+import { FaissStore } from '@langchain/community/vectorstores/faiss';
 
 main()
   .catch((error) => console.error('Error processing documents:', error));
@@ -19,22 +18,12 @@ async function main() {
 
   const documents = await getDocumentsFromJsonFiles(path);
   console.log('Documents loaded:', documents.length);
-  
+
   const chunks = await chunkify(documents);
   console.log('Chunks created:', chunks.length);
 
   await createEmbeddings(chunks);
   console.log('Embeddings created and stored successfully.');
-}
-
-function getSupabaseClient() {
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error('Supabase URL and Service Role Key must be set in environment variables.');
-  }
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const supabase = createClient(supabaseUrl, supabaseKey);
-  return supabase;
 }
 
 async function readJsonFile(filePath) {
@@ -47,19 +36,33 @@ async function readJsonFile(filePath) {
 }
 
 function objectToDocument(object) {
-  const fullText = `
-Title: ${object.title}
-Artist: ${object.artist}
-Dated: ${object.dated}
-Department: ${object.department}
-Description: ${object.description}
-Medium: ${object.medium}
-Dimensions: ${object.dimensions}
-Credit Line: ${object.creditLine}
-Style: ${object.style}
-Text: ${object.text}
-`.trim();
-  return new Document({ pageContent: fullText });
+  // Filter empty fields
+  const fields = [
+    { label: 'Title', value: object.title },
+    { label: 'Artist', value: object.artist },
+    { label: 'Dated', value: object.dated },
+    { label: 'Department', value: object.department },
+    { label: 'Description', value: object.description },
+    { label: 'Medium', value: object.medium },
+    { label: 'Country', value: object.country },
+    { label: 'Dimensions', value: object.dimensions },
+    { label: 'Credit Line', value: object.creditLine },
+    { label: 'Style', value: object.style },
+    { label: 'Text', value: object.text }
+  ];
+  const fullText = fields
+    .filter(f => f.value !== undefined && f.value !== null && f.value !== '')
+    .map(f => `${f.label}: ${f.value}`)
+    .join('\n');
+
+  return new Document({
+    pageContent: fullText,
+    metadata: {
+      title: object.title || '',
+      artist: object.artist || '',
+      source: 'ingest-script'
+    }
+  });
 }
 
 async function getDocumentsFromJsonFiles(dir, documents = []) {
@@ -83,7 +86,7 @@ async function getDocumentsFromJsonFiles(dir, documents = []) {
 async function chunkify(documents) {
   const splitter = new RecursiveCharacterTextSplitter({
     chunkSize: 500,
-    chunkOverlap: 100,
+    chunkOverlap: 50,
   });
   return splitter.splitDocuments(documents);
 }
@@ -103,8 +106,12 @@ async function withRetry(fn, maxRetries = 5) {
     try {
       return await fn();
     } catch (err) {
-      if (err.status === 429 && attempt < maxRetries) {
-        console.warn(`Rate limit hit, retrying in ${delay}ms...`);
+      // Retry on rate limit or connection errors
+      if (
+        (err.status === 429 || err.message?.includes('connect')) &&
+        attempt < maxRetries
+      ) {
+        console.warn(`Error: ${err.message || err}. Retrying in ${delay}ms...`);
         await sleep(delay);
         attempt++;
         delay *= 2;
@@ -116,13 +123,13 @@ async function withRetry(fn, maxRetries = 5) {
 }
 
 async function createEmbeddings(chunks) {
-  const supabase = getSupabaseClient();
   const embeddings = new OpenAIEmbeddings({ openAIApiKey: process.env.OPENAI_API_KEY });
-  const maxTokensPerBatch = 290_000; // Stay under OpenAI's 300k/request limit
+  const maxTokensPerBatch = 50_000; // Stay under OpenAI's 300k/request limit
   let batch = [];
   let batchTokens = 0;
   let batchCount = 0;
   let totalChunks = 0;
+  let faiss = null;
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
@@ -130,15 +137,16 @@ async function createEmbeddings(chunks) {
     if (batchTokens + tokens > maxTokensPerBatch && batch.length > 0) {
       batchCount++;
       console.log(`Sending batch #${batchCount} with ${batch.length} chunks, ~${batchTokens} tokens`);
-      await withRetry(() =>
-        SupabaseVectorStore.fromDocuments(batch, embeddings, {
-          client: supabase,
-          tableName: 'documents',
-          queryName: 'match_documents',
-        })
-      );
+      if (!faiss) {
+        faiss = await withRetry(() =>
+          FaissStore.fromDocuments(batch, embeddings)
+        );
+      } else {
+        const docs = [...batch];
+        await withRetry(() => faiss.addDocuments(docs, embeddings));
+      }
       totalChunks += batch.length;
-      await sleep(2000);
+      await sleep(5000);
       // Start new batch
       batch = [];
       batchTokens = 0;
@@ -150,14 +158,19 @@ async function createEmbeddings(chunks) {
   if (batch.length > 0) {
     batchCount++;
     console.log(`Sending batch #${batchCount} with ${batch.length} chunks, ~${batchTokens} tokens`);
-    await withRetry(() =>
-      SupabaseVectorStore.fromDocuments(batch, embeddings, {
-        client: supabase,
-        tableName: 'documents',
-        queryName: 'match_documents',
-      })
-    );
+    if (!faiss) {
+      faiss = await withRetry(() =>
+        FaissStore.fromDocuments(batch, embeddings)
+      );
+    } else {
+      const docs = [...batch];
+      await withRetry(() => faiss.addDocuments(docs, embeddings));
+    }
     totalChunks += batch.length;
+  }
+  if (faiss) {
+    await faiss.save('../faiss.index');
+    console.log('FAISS index saved');
   }
   console.log(`All batches sent. Total chunks processed: ${totalChunks}`);
 }

@@ -1,0 +1,85 @@
+.rag-container {
+  max-width: 600px;
+  margin: 2rem auto;
+  padding: 2rem;
+  background: #fff;
+  border-radius: 1rem;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+  font-family: system-ui, sans-serif;
+}
+
+.rag-form {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.rag-input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  border: 1px solid #ccc;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+}
+
+.rag-btn {
+  padding: 0.75rem 1.5rem;
+  background: #0057b8;
+  color: #fff;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.rag-btn:hover {
+  background: #003e8a;
+}
+
+.rag-loading {
+  color: #888;
+  margin-bottom: 1rem;
+}
+
+.rag-response {
+  margin-top: 2rem;
+  background: #f6f8fa;
+  border-radius: 0.5rem;
+  padding: 1.5rem;
+}
+
+.rag-answer {
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem;
+}
+
+.rag-sources {
+  list-style: none;
+  padding: 0;
+}
+
+.rag-sources li {
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #eee;
+}
+
+.rag-sources strong {
+  color: #0057b8;
+}
+
+@media (max-width: 700px) {
+  .rag-container {
+    padding: 1rem;
+  }
+
+  .rag-form {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .rag-btn {
+    width: 100%;
+  }
+}
